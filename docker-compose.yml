@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: vocagent
+      POSTGRES_PASSWORD: vocagent
+      POSTGRES_DB: vocagent
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  voc-agent:
+    build: .
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - DB_URL=postgresql://vocagent:vocagent@postgres:5432/vocagent
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - postgres
+    volumes:
+      - ./docs:/app/docs
+      - ./logs:/app/logs
+
+volumes:
+  redis-data:
+  postgres-data:
