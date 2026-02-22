@@ -4,7 +4,9 @@ import { redisConnection } from './utils/redis';
 import { processVOCAnalysis } from './services/analysisService';
 import { processPRDWriting } from './services/prdService';
 import { processPRDReview } from './services/reviewService';
-import { sendStatusUpdate, sendError } from './services/telegramService';
+import { processDevelopment } from './services/developmentService';
+import { processTesting } from './services/testingService';
+import { sendError } from './services/telegramService';
 
 // VOC 처리 워커
 const vocWorker = new Worker('voc-processing', async (job) => {
@@ -23,16 +25,10 @@ const vocWorker = new Worker('voc-processing', async (job) => {
       return await processPRDReview(vocId, data);
 
     case 'development':
-      // Phase 2에서 구현 예정 (Claude Code tmux 연동)
-      logger.info(`Development phase for VOC ${vocId} - Phase 2 feature`);
-      await sendStatusUpdate(vocId, '개발 단계는 Phase 2에서 Claude Code 연동으로 구현 예정입니다.');
-      return { status: 'development_pending', vocId };
+      return await processDevelopment(vocId, data);
 
     case 'testing':
-      // Phase 2에서 구현 예정
-      logger.info(`Testing phase for VOC ${vocId} - Phase 2 feature`);
-      await sendStatusUpdate(vocId, '테스트 단계는 Phase 2에서 구현 예정입니다.');
-      return { status: 'testing_pending', vocId };
+      return await processTesting(vocId, data);
 
     default:
       throw new Error(`Unknown phase: ${phase}`);

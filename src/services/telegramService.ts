@@ -93,6 +93,71 @@ export async function sendStatusUpdate(vocId: number, statusMessage: string) {
   await sendMessage(message);
 }
 
+export async function sendDevProgress(vocId: number, progressMessage: string) {
+  const message = [
+    `VOC #${vocId} 개발 진행`,
+    ``,
+    progressMessage,
+  ].join('\n');
+
+  await sendMessage(message);
+}
+
+export async function sendDevComplete(vocId: number, branch: string, commitInfo: string) {
+  const message = [
+    `개발 완료`,
+    ``,
+    `VOC #${vocId}`,
+    `브랜치: ${branch}`,
+    `커밋:`,
+    commitInfo,
+    ``,
+    `테스트를 진행하겠습니다.`,
+  ].join('\n');
+
+  await sendMessage(message);
+}
+
+export async function sendTestResult(vocId: number, testResult: any) {
+  const passed = testResult.passed || 0;
+  const total = testResult.total || 0;
+  const failed = testResult.failed || 0;
+  const coverage = testResult.coverage != null ? `${testResult.coverage}%` : 'N/A';
+  const statusIcon = failed === 0 ? 'PASS' : 'FAIL';
+
+  const bugList = testResult.bugs?.length
+    ? `\n버그:\n${testResult.bugs.map((b: string) => `- ${b}`).join('\n')}`
+    : '';
+
+  const message = [
+    `테스트 결과 [${statusIcon}]`,
+    ``,
+    `VOC #${vocId}`,
+    `통과: ${passed}/${total}`,
+    `커버리지: ${coverage}`,
+    bugList,
+    ``,
+    `배포하시겠습니까?`,
+  ].join('\n');
+
+  await sendMessage(message, Markup.inlineKeyboard([
+    Markup.button.callback('배포', `deploy_${vocId}`),
+    Markup.button.callback('수정 요청', `fix_${vocId}`),
+    Markup.button.callback('보류', `hold_${vocId}`),
+  ]));
+}
+
+export async function sendDeployComplete(vocId: number) {
+  const message = [
+    `배포 완료`,
+    ``,
+    `VOC #${vocId} 처리 완료되었습니다.`,
+    `배포 시간: ${new Date().toLocaleString('ko-KR')}`,
+  ].join('\n');
+
+  await sendMessage(message);
+}
+
 export async function sendError(vocId: number, errorMessage: string) {
   const message = [
     `오류 발생`,
@@ -177,16 +242,29 @@ function setupCallbackHandlers() {
     }
   });
 
-  // PRD 승인
+  // PRD 승인 → 개발 시작
   bot.action(/approve_prd_(\d+)/, async (ctx) => {
     const vocId = parseInt(ctx.match[1]);
     logger.info(`User approved PRD for VOC ${vocId}`);
-    await ctx.answerCbQuery('PRD 승인되었습니다');
+    await ctx.answerCbQuery('PRD 승인 - 개발을 시작합니다');
     await ctx.editMessageReplyMarkup(undefined);
 
     try {
-      await repo.updateStatus(vocId, 'developing');
-      await sendStatusUpdate(vocId, '개발 준비 중입니다. Claude Code 연동은 Phase 2에서 구현 예정입니다.');
+      const workflow = await repo.getByVocId(vocId);
+      if (!workflow) return;
+
+      await getQueue().add('process-voc', {
+        phase: 'development',
+        vocId,
+        data: {
+          title: workflow.title,
+          description: workflow.description,
+          analysis: workflow.analysis_result,
+          prdPath: workflow.prd_path,
+        },
+      }, {
+        jobId: `voc-${vocId}-development`,
+      });
     } catch (err) {
       logger.error(`Error processing PRD approval for VOC ${vocId}:`, err);
     }
@@ -237,6 +315,65 @@ function setupCallbackHandlers() {
       await repo.updateStatus(vocId, 'rejected');
     } catch (err) {
       logger.error(`Error processing PRD rejection for VOC ${vocId}:`, err);
+    }
+  });
+
+  // 배포 승인
+  bot.action(/deploy_(\d+)/, async (ctx) => {
+    const vocId = parseInt(ctx.match[1]);
+    logger.info(`User approved deployment for VOC ${vocId}`);
+    await ctx.answerCbQuery('배포를 진행합니다');
+    await ctx.editMessageReplyMarkup(undefined);
+
+    try {
+      await repo.updateStatus(vocId, 'completed');
+      await sendDeployComplete(vocId);
+    } catch (err) {
+      logger.error(`Error processing deployment for VOC ${vocId}:`, err);
+    }
+  });
+
+  // 수정 요청 (테스트 후)
+  bot.action(/fix_(\d+)/, async (ctx) => {
+    const vocId = parseInt(ctx.match[1]);
+    logger.info(`User requested fix for VOC ${vocId}`);
+    await ctx.answerCbQuery('수정을 위해 개발 단계로 돌아갑니다');
+    await ctx.editMessageReplyMarkup(undefined);
+
+    try {
+      const workflow = await repo.getByVocId(vocId);
+      if (!workflow) return;
+
+      await getQueue().add('process-voc', {
+        phase: 'development',
+        vocId,
+        data: {
+          title: workflow.title,
+          description: workflow.description,
+          analysis: workflow.analysis_result,
+          prdPath: workflow.prd_path,
+          fixMode: true,
+        },
+      }, {
+        jobId: `voc-${vocId}-fix-${Date.now()}`,
+      });
+    } catch (err) {
+      logger.error(`Error processing fix request for VOC ${vocId}:`, err);
+    }
+  });
+
+  // 보류
+  bot.action(/hold_(\d+)/, async (ctx) => {
+    const vocId = parseInt(ctx.match[1]);
+    logger.info(`User put VOC ${vocId} on hold`);
+    await ctx.answerCbQuery('보류 처리되었습니다');
+    await ctx.editMessageReplyMarkup(undefined);
+
+    try {
+      await repo.updateStatus(vocId, 'error'); // hold 상태가 없으므로 error로 대체
+      await sendStatusUpdate(vocId, '보류 처리되었습니다. 추후 재개하려면 수동 개입이 필요합니다.');
+    } catch (err) {
+      logger.error(`Error processing hold for VOC ${vocId}:`, err);
     }
   });
 }

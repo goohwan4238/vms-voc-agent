@@ -128,6 +128,32 @@ export async function incrementReviewCount(vocId: number): Promise<VocWorkflow> 
   return rows[0];
 }
 
+export async function saveDevBranch(vocId: number, branch: string): Promise<VocWorkflow> {
+  const { rows } = await localPool.query(
+    `UPDATE voc_workflow
+     SET dev_branch = $1, updated_at = NOW()
+     WHERE voc_id = $2
+     RETURNING *`,
+    [branch, vocId]
+  );
+
+  if (rows.length === 0) throw new Error(`Workflow not found for VOC ${vocId}`);
+  return rows[0];
+}
+
+export async function saveTestResult(vocId: number, testResult: any): Promise<VocWorkflow> {
+  const { rows } = await localPool.query(
+    `UPDATE voc_workflow
+     SET test_result = $1, updated_at = NOW()
+     WHERE voc_id = $2
+     RETURNING *`,
+    [JSON.stringify(testResult), vocId]
+  );
+
+  if (rows.length === 0) throw new Error(`Workflow not found for VOC ${vocId}`);
+  return rows[0];
+}
+
 export async function listByStatus(status: VocStatus): Promise<VocWorkflow[]> {
   const { rows } = await localPool.query(
     'SELECT * FROM voc_workflow WHERE status = $1 ORDER BY created_at DESC',
