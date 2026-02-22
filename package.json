@@ -10,6 +10,7 @@
     "dev:server": "ts-node src/server.ts",
     "dev:worker": "ts-node src/worker.ts",
     "dev:poller": "ts-node src/poller.ts",
+    "migrate": "ts-node src/db/migrate.ts",
     "lint": "eslint src/**/*.ts",
     "typecheck": "tsc --noEmit"
   },
