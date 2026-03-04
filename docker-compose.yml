@@ -10,18 +10,21 @@ services:
     command: redis-server --appendonly yes
 
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16
     environment:
       POSTGRES_USER: vocagent
       POSTGRES_PASSWORD: vocagent
       POSTGRES_DB: vocagent
     ports:
-      - "5433:5432"
+      - "5434:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d
 
   voc-agent:
     build: .
+    ports:
+      - "3000:3000"
     environment:
       - NODE_ENV=production
       - REDIS_URL=redis://redis:6379
@@ -34,6 +37,7 @@ services:
     volumes:
       - ./docs:/app/docs
       - ./logs:/app/logs
+      - ${VMSWORKS_REPO_PATH:-./.vmsworks-placeholder}:/app/vmsworks
 
 volumes:
   redis-data:

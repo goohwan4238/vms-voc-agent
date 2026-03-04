@@ -1,18 +1,37 @@
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci
+
+COPY . .
+RUN npm run build
+
+# --- Dashboard build ---
+FROM node:20-alpine AS dashboard-builder
+
+WORKDIR /app/dashboard
+
+COPY dashboard/package*.json ./
+RUN npm ci
+
+COPY dashboard/ .
+RUN npm run build
+
+# --- Production ---
 FROM node:20-alpine
 
 WORKDIR /app
 
-# 의존성 설치
 COPY package*.json ./
 RUN npm ci --only=production
 
-# 소스 복사
-COPY . .
-RUN npm run build
+COPY --from=builder /app/dist ./dist
+COPY --from=dashboard-builder /app/dashboard/dist ./dashboard/dist
 
-# 비루트 사용자로 실행
 USER node
 
 EXPOSE 3000
 
-CMD ["npm", "start"]
+CMD ["node", "dist/index.js", "all"]

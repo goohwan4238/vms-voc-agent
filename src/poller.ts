@@ -1,41 +1,66 @@
 import { Pool } from 'pg';
-import Redis from 'ioredis';
 import { Queue } from 'bullmq';
 import logger from './utils/logger';
+import pool, { upsertWorkflow } from './utils/db';
 
-const vmsPool = new Pool({
+// vmsworks DB 커넥션 (외부 읽기 + 상태 쓰기용)
+export const vmsPool = new Pool({
   connectionString: process.env.VMS_DB_URL,
   ssl: false,
 });
 
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
-const vocQueue = new Queue('voc-processing', { connection: redis });
+const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+const vocQueue = new Queue('voc-processing', { connection: { url: redisUrl } });
 
 let lastCheckedTime = new Date();
+
+// 에이전트 DB에서 마지막 처리 시간을 조회하여 lastCheckedTime 초기화
+async function initLastCheckedTime() {
+  try {
+    const result = await pool.query(
+      'SELECT MAX(created_at) as last_time FROM voc_workflows'
+    );
+    if (result.rows[0]?.last_time) {
+      lastCheckedTime = new Date(result.rows[0].last_time);
+      logger.info(`Initialized lastCheckedTime from DB: ${lastCheckedTime.toISOString()}`);
+    } else {
+      logger.info('No existing workflows found, using current time as lastCheckedTime');
+    }
+  } catch (err) {
+    logger.warn('Failed to initialize lastCheckedTime from DB, using current time:', err);
+  }
+}
 
 async function checkNewVOCs() {
   try {
     const query = `
-      SELECT ar.*, u.name as requester_name
-      FROM approval_requests ar
-      LEFT JOIN users u ON ar.requester_id = u.id
-      WHERE ar.created_at > $1
-        AND ar.status = 'submitted'
-      ORDER BY ar.created_at ASC
+      SELECT vr.id, vr.title, vr.description, vr.voc_type, vr.priority,
+             vr.status, vr.created_at, u.name as requester_name
+      FROM voc_requests vr
+      LEFT JOIN users u ON vr.requester_id = u.id
+      WHERE vr.created_at > $1
+        AND vr.status = 'registered'
+      ORDER BY vr.created_at ASC
     `;
-    
+
     const result = await vmsPool.query(query, [lastCheckedTime]);
-    
+
     for (const row of result.rows) {
-      logger.info(`New VOC detected: ${row.id} - ${row.title}`);
-      
+      logger.info(`New VOC detected: VOC-${row.id} - ${row.title} [${row.voc_type}]`);
+
+      // queued_at 타임스탬프 기록
+      await upsertWorkflow(`VOC-${row.id}`, { queued_at: new Date() });
+
       // Redis 큐에 작업 등록
       await vocQueue.add('process-voc', {
         phase: 'analysis',
-        vocId: row.id,
+        vocId: `VOC-${row.id}`,
         data: {
+          vmsVocId: row.id,
           title: row.title,
           description: row.description,
+          vocType: row.voc_type,
+          priority: row.priority,
           requester: row.requester_name,
           createdAt: row.created_at,
         },
@@ -48,42 +73,25 @@ async function checkNewVOCs() {
         },
       });
     }
-    
-    lastCheckedTime = new Date();
+
+    if (result.rows.length > 0) {
+      lastCheckedTime = new Date();
+    }
   } catch (err) {
     logger.error('Error checking new VOCs:', err);
   }
 }
 
-// PostgreSQL LISTEN 방식 (VMS Works에 트리거 필요)
-async function listenVOCNotifications() {
-  const client = await vmsPool.connect();
-  
-  client.on('notification', async (msg) => {
-    logger.info('Received PostgreSQL notification:', msg.payload);
-    const payload = JSON.parse(msg.payload || '{}');
-    
-    await vocQueue.add('process-voc', {
-      phase: 'analysis',
-      vocId: payload.id,
-      data: payload,
-    });
-  });
-  
-  await client.query('LISTEN new_voc');
-  logger.info('Listening for VOC notifications...');
-}
-
 // 메인 실행
 async function startPoller() {
   logger.info('VOC Poller started');
-  
-  // 폴 방식 (기본)
-  setInterval(checkNewVOCs, 60000); // 1분 간격
-  
-  // LISTEN 방식 (VMS Works 수정 시)
-  // await listenVOCNotifications();
-  
+
+  // 마지막 처리 시간 초기화
+  await initLastCheckedTime();
+
+  // 폴 방식 (60초 간격)
+  setInterval(checkNewVOCs, 60000);
+
   // 즉시 한 번 실행
   await checkNewVOCs();
 }
