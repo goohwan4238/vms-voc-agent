@@ -24,7 +24,7 @@ services:
   voc-agent:
     build: .
     ports:
-      - "3000:3000"
+      - "4000:4000"
     environment:
       - NODE_ENV=production
       - REDIS_URL=redis://redis:6379

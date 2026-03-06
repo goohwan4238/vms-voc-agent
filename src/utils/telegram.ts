@@ -56,6 +56,33 @@ export async function notifyPRDApproval(vocId: string, title: string, prdPath: s
   return msg;
 }
 
+// 리뷰 실패 후 승인 요청 알림
+export async function notifyReviewApproval(vocId: string, title: string, reviewResult: any) {
+  const stepSummary = (reviewResult?.steps || [])
+    .map((s: any) => `${s.passed ? '✅' : '❌'} ${s.step} (${s.issues?.length || 0} issues)`)
+    .join('\n');
+
+  const msg = await bot.telegram.sendMessage(
+    chatId,
+    `🔍 *코드 리뷰 승인 요청*\n\n` +
+    `*VOC*: ${escapeMarkdownV2(title)}\n` +
+    `*ID*: \`${vocId}\`\n\n` +
+    `자동 수정 2회 시도 후에도 리뷰를 통과하지 못했습니다\\.\n\n` +
+    `${escapeMarkdownV2(stepSummary)}\n\n` +
+    `계속 진행할까요?`,
+    {
+      parse_mode: 'MarkdownV2',
+      ...Markup.inlineKeyboard([
+        Markup.button.callback('✅ 계속 진행', `review-approve:${vocId}`),
+        Markup.button.callback('❌ 중단', `review-reject:${vocId}`),
+      ]),
+    },
+  );
+
+  await upsertWorkflow(vocId, { telegram_message_id: msg.message_id });
+  return msg;
+}
+
 // 상태 변경 알림
 export async function notifyStatusChange(vocId: string, title: string, phase: string, status: string) {
   await bot.telegram.sendMessage(
@@ -97,7 +124,40 @@ export function setupBotCallbacks() {
     await ctx.reply(`✅ VOC ${vocId} PRD가 승인되었습니다. 개발 단계로 진행합니다.`);
   });
 
-  // 반려 콜백
+  // 리뷰 승인 콜백 (리뷰 실패 후 계속 진행)
+  bot.action(/^review-approve:(.+)$/, async (ctx) => {
+    const vocId = ctx.match[1];
+    logger.info(`Review approved for VOC ${vocId} by ${ctx.from?.username}`);
+
+    await upsertWorkflow(vocId, { phase: 'review', status: 'completed', review_completed_at: new Date() });
+    broadcastSSE({ type: 'workflow-updated', vocId });
+
+    // testing 큐 등록
+    await getQueue().add('process-voc', {
+      phase: 'testing',
+      vocId,
+      data: {},
+    }, {
+      jobId: `voc-${vocId}-testing`,
+    });
+
+    await ctx.editMessageReplyMarkup(undefined);
+    await ctx.reply(`✅ VOC ${vocId} 리뷰가 승인되었습니다. 테스트 단계로 진행합니다.`);
+  });
+
+  // 리뷰 반려 콜백 (파이프라인 종료)
+  bot.action(/^review-reject:(.+)$/, async (ctx) => {
+    const vocId = ctx.match[1];
+    logger.info(`Review rejected for VOC ${vocId} by ${ctx.from?.username}`);
+
+    await upsertWorkflow(vocId, { phase: 'review', status: 'rejected' });
+    broadcastSSE({ type: 'workflow-updated', vocId });
+
+    await ctx.editMessageReplyMarkup(undefined);
+    await ctx.reply(`❌ VOC ${vocId} 리뷰가 반려되었습니다. 파이프라인이 중단됩니다.`);
+  });
+
+  // PRD 반려 콜백
   bot.action(/^reject:(.+)$/, async (ctx) => {
     const vocId = ctx.match[1];
     logger.info(`PRD rejected for VOC ${vocId} by ${ctx.from?.username}`);

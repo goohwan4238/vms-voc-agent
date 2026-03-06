@@ -28,6 +28,7 @@ export async function vocWebhookHandler(req: Request, res: Response) {
       requester: voc.requester,
       phase: 'queued',
       status: 'pending',
+      queued_at: new Date(),
     });
 
     // Redis 큐에 분석 작업 등록

@@ -2,6 +2,7 @@ import { Worker, Queue } from 'bullmq';
 import logger from './utils/logger';
 import { broadcastSSE } from './utils/sse';
 import { getStuckWorkflows } from './utils/db';
+import { notifyReviewApproval } from './utils/telegram';
 import { processVOCAnalysis } from './services/analysisService';
 import { processPRDWriting } from './services/prdService';
 import { processDevelopment } from './services/developmentService';
@@ -26,10 +27,17 @@ async function enqueueNextPhase(vocId: string, currentPhase: string, result: any
   const nextPhase = NEXT_PHASE[currentPhase];
   if (!nextPhase) return;
 
-  // review 실패 시 testing으로 체이닝하지 않음
-  if (currentPhase === 'review' && result.status === 'review_failed') {
-    logger.info(`VOC ${vocId}: Review failed — not chaining to testing. Manual intervention required.`);
-    return;
+  // review 실패 → Telegram 승인 요청 또는 중단
+  if (currentPhase === 'review') {
+    if (result.status === 'review_failed') {
+      logger.info(`VOC ${vocId}: Review failed — not chaining to testing. Manual intervention required.`);
+      return;
+    }
+    if (result.status === 'review_needs_approval') {
+      logger.info(`VOC ${vocId}: Review failed after retries — requesting Telegram approval.`);
+      await notifyReviewApproval(vocId, result.title || vocId, result.reviewResult);
+      return;
+    }
   }
 
   logger.info(`Chaining VOC ${vocId}: ${currentPhase} → ${nextPhase}`);

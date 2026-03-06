@@ -86,6 +86,7 @@ export async function initDB() {
       ALTER TABLE voc_workflows ADD COLUMN IF NOT EXISTS testing_started_at TIMESTAMP;
       ALTER TABLE voc_workflows ADD COLUMN IF NOT EXISTS testing_completed_at TIMESTAMP;
       ALTER TABLE voc_workflows ADD COLUMN IF NOT EXISTS deployed_at TIMESTAMP;
+      ALTER TABLE voc_workflows ADD COLUMN IF NOT EXISTS review_retry_count INTEGER DEFAULT 0;
 
       CREATE INDEX IF NOT EXISTS idx_voc_workflows_voc_id ON voc_workflows(voc_id);
       CREATE INDEX IF NOT EXISTS idx_voc_workflows_phase ON voc_workflows(phase);
@@ -121,6 +122,7 @@ export async function upsertWorkflow(vocId: string, data: Partial<{
   testing_started_at: Date;
   testing_completed_at: Date;
   deployed_at: Date;
+  review_retry_count: number;
 }>) {
   const fields = Object.keys(data);
   const values = Object.values(data);

@@ -5,7 +5,6 @@ import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useWorkflow } from '@/hooks/useWorkflow';
-import { WorkflowStatusBadge } from './WorkflowStatusBadge';
 import { WorkflowPhaseTracker } from './WorkflowPhaseTracker';
 import { WorkflowTimeline } from './WorkflowTimeline';
 import { PrdViewer } from './PrdViewer';
@@ -60,10 +59,6 @@ export function WorkflowDetail() {
             <div>
               <dt className="text-muted-foreground">요청자</dt>
               <dd>{workflow.requester || '-'}</dd>
-            </div>
-            <div>
-              <dt className="text-muted-foreground">상태</dt>
-              <dd><WorkflowStatusBadge phase={workflow.phase} status={workflow.status} /></dd>
             </div>
             <div>
               <dt className="text-muted-foreground">갱신일</dt>

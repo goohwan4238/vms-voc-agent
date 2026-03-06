@@ -12,11 +12,11 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/voc': 'http://localhost:3000',
-      '/webhook': 'http://localhost:3000',
-      '/health': 'http://localhost:3000',
+      '/voc': 'http://localhost:4000',
+      '/webhook': 'http://localhost:4000',
+      '/health': 'http://localhost:4000',
       '/events': {
-        target: 'http://localhost:3000',
+        target: 'http://localhost:4000',
         // SSE는 버퍼링 비활성화 필요 없음 — Vite가 자동 처리
       },
     },
